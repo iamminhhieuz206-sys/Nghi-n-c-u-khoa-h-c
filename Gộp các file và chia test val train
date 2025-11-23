@@ -1,0 +1,66 @@
+import os
+import shutil
+import random
+from glob import glob
+
+# ==== PATH 3 folder của bạn ====
+datasets = [
+    "canh_bi_do",
+    "chao_trang",
+    "trung_chien"
+]
+
+# ==== Tạo dataset output ====
+output_base = "dataset"
+output_images = os.path.join(output_base, "images")
+output_labels = os.path.join(output_base, "labels")
+
+splits = ["train", "val", "test"]
+
+# Tạo thư mục output
+for split in splits:
+    os.makedirs(os.path.join(output_images, split), exist_ok=True)
+    os.makedirs(os.path.join(output_labels, split), exist_ok=True)
+
+# Thu thập toàn bộ file ảnh (png, jpg, jpeg)
+all_images = []
+extensions = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"]
+
+for d in datasets:
+    for ext in extensions:
+        all_images.extend(glob(os.path.join(d, ext)))
+
+print("Tổng số ảnh =", len(all_images))
+
+# Shuffle
+random.shuffle(all_images)
+
+# Tỷ lệ chia
+total = len(all_images)
+train_split = int(0.7 * total)
+val_split = int(0.2 * total)
+
+train_files = all_images[:train_split]
+val_files = all_images[train_split:train_split + val_split]
+test_files = all_images[train_split + val_split:]
+
+def copy_files(file_list, split_name):
+    for img_path in file_list:
+        base = os.path.splitext(img_path)[0]
+        label_path = base + ".txt"
+
+        # Copy ảnh
+        shutil.copy(img_path, os.path.join(output_images, split_name))
+
+        # Copy nhãn
+        if os.path.exists(label_path):
+            shutil.copy(label_path, os.path.join(output_labels, split_name))
+        else:
+            print("⚠️ Không tìm thấy label cho:", img_path)
+
+# Chạy copy
+copy_files(train_files, "train")
+copy_files(val_files, "val")
+copy_files(test_files, "test")
+
+print("🎉 DONE! Dataset YOLO đã được gộp & chia xong!")
