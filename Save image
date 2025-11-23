@@ -1,0 +1,88 @@
+import cv2
+import os
+import math
+from yt_dlp import YoutubeDL
+
+VIDEO_URL = "https://www.youtube.com/watch?v=ESj-_CSp74c"
+SAVE_VIDEO = "video.mp4"
+OUTPUT_DIR = "chao_trang"
+START_TIME = 6*60 + 36
+END_TIME = 6*60 + 40
+NUM_FRAMES = 100
+CLASS_ID = 0
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+print("Đang tải video mới bằng yt-dlp...")
+ydl_opts = {'format': 'mp4', 'outtmpl': SAVE_VIDEO}
+with YoutubeDL(ydl_opts) as ydl:
+    ydl.download([VIDEO_URL])
+print("Tải xong video!")
+
+cap = cv2.VideoCapture(SAVE_VIDEO)
+fps = cap.get(cv2.CAP_PROP_FPS)
+
+start_frame = int(START_TIME * fps)
+end_frame = int(END_TIME * fps)
+total_frames = end_frame - start_frame + 1
+step = max(1, total_frames // NUM_FRAMES)
+
+cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+frame_count = start_frame
+
+ret, frame = cap.read()
+if not ret:
+    raise Exception("Không thể đọc frame đầu tiên! Video bị lỗi.")
+
+# --- Resize để tránh lỗi hiển thị ROI ---
+display_frame = frame.copy()
+h, w = display_frame.shape[:2]
+max_size = 900
+scale = min(max_size / max(h, w), 1.0)
+if scale < 1.0:
+    display_frame = cv2.resize(display_frame, (int(w * scale), int(h * scale)))
+
+bbox_scaled = cv2.selectROI("Chọn vật thể", display_frame, showCrosshair=False)
+cv2.destroyWindow("Chọn vật thể")
+
+# Chuyển bbox về scale gốc
+bbox = (
+    int(bbox_scaled[0] / scale),
+    int(bbox_scaled[1] / scale),
+    int(bbox_scaled[2] / scale),
+    int(bbox_scaled[3] / scale)
+)
+
+tracker = cv2.legacy.TrackerCSRT_create()
+tracker.init(frame, bbox)
+
+saved = 180
+
+while frame_count <= end_frame:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    ok, bbox = tracker.update(frame)
+    if ok and (frame_count - start_frame) % step == 0:
+        x, y, w, h = map(int, bbox)
+        crop = frame[y:y+h, x:x+w]
+
+        img_name = f"chaotrang_{saved}.png"
+        cv2.imwrite(os.path.join(OUTPUT_DIR, img_name), crop)
+
+        fh, fw = frame.shape[:2]
+        xc = (x + w/2) / fw
+        yc = (y + h/2) / fh
+        wn = w / fw
+        hn = h / fh
+
+        with open(os.path.join(OUTPUT_DIR, f"chaotrang_{saved}.txt"), "w") as f:
+            f.write(f"{CLASS_ID} {xc:.6f} {yc:.6f} {wn:.6f} {hn:.6f}\n")
+
+        saved += 1
+
+    frame_count += 1
+
+cap.release()
+print("Xong!")
