@@ -1,76 +1,109 @@
 import os
 import cv2
-from albumentations import (
-    Compose, HorizontalFlip, VerticalFlip, Rotate,
-    RandomBrightnessContrast, GaussNoise, ShiftScaleRotate
+import albumentations as A
+
+# ===================== CONFIG =====================
+CLASS_DIR = r"D:\Robotic\Coca_chai_moi"   # 1 folder = 1 class
+AUG_PER_IMAGE = 3
+IMG_EXTS = (".jpg", ".png", ".jpeg")
+
+# ===================== AUG PIPELINE =====================
+transform = A.Compose(
+    [
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.2),
+        A.Rotate(limit=20, p=0.7),
+        A.ShiftScaleRotate(
+            shift_limit=0.1,
+            scale_limit=0.2,
+            rotate_limit=0,
+            p=0.7
+        ),
+        A.RandomBrightnessContrast(p=0.6),
+        A.GaussNoise(p=0.3)
+    ],
+    bbox_params=A.BboxParams(
+        format="yolo",
+        label_fields=["class_labels"],
+        min_visibility=0.3
+    )
 )
 
-DATASET_DIR = "chao_trang"   # Thư mục mới
-AUG_PER_IMAGE = 3             # Tạo 3 ảnh augment mỗi ảnh
-START_FROM = 1                # Lấy từ ảnh 1 trở đi
+# ===================== HÀM =====================
+def load_yolo_label(label_path):
+    bboxes = []
+    labels = []
+    if not os.path.exists(label_path):
+        return bboxes, labels
 
-# ==== TÌM SỐ CUỐI CÙNG HIỆN TẠI ====
-existing_imgs = [f for f in os.listdir(DATASET_DIR) if f.startswith("chaotrang_") and f.endswith(".png")]
-existing_nums = []
+    with open(label_path, "r") as f:
+        for line in f:
+            cls, x, y, w, h = line.strip().split()
+            bboxes.append([float(x), float(y), float(w), float(h)])
+            labels.append(int(cls))
+    return bboxes, labels
 
-for img in existing_imgs:
-    num = img.replace("chaotrang_", "").replace(".png", "")
-    if num.isdigit():
-        existing_nums.append(int(num))
 
-start_index = max(existing_nums) + 1   # bắt đầu từ 301
+def save_yolo_label(path, bboxes, labels):
+    with open(path, "w") as f:
+        for box, cls in zip(bboxes, labels):
+            f.write(f"{cls} {box[0]:.6f} {box[1]:.6f} {box[2]:.6f} {box[3]:.6f}\n")
 
-# ==== DEFINE AUGMENTATION ====
-transform = Compose([
-    HorizontalFlip(p=0.5),
-    VerticalFlip(p=0.2),
-    Rotate(limit=40, p=0.5),
-    RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.7),
-    GaussNoise(var_limit=(10.0, 40.0), p=0.5),
-    ShiftScaleRotate(shift_limit=0.1, scale_limit=0.15, rotate_limit=15, p=0.5)
-])
 
-new_index = start_index
+def get_last_index(folder):
+    idx = -1
+    for f in os.listdir(folder):
+        name, ext = os.path.splitext(f)
+        if ext.lower() in IMG_EXTS:
+            parts = name.split("_")
+            if parts[-1].isdigit():
+                idx = max(idx, int(parts[-1]))
+    return idx + 1
 
-# ==== ÁP DỤNG AUGMENT CHO TẤT CẢ ẢNH ====
-for img_name in sorted(existing_imgs):
 
-    num = int(img_name.replace("chaotrang_", "").replace(".png", ""))
+# ===================== MAIN =====================
+class_name = os.path.basename(CLASS_DIR)
+images = sorted(
+    f for f in os.listdir(CLASS_DIR)
+    if f.lower().endswith(IMG_EXTS)
+)
 
-    # BỎ QUA ảnh < START_FROM nếu muốn
-    if num < START_FROM:
+start_idx = get_last_index(CLASS_DIR)
+
+print(f"▶ Augment class: {class_name}")
+print(f"▶ Start index: {start_idx}")
+
+for img_name in images:
+    img_path = os.path.join(CLASS_DIR, img_name)
+    label_path = os.path.splitext(img_path)[0] + ".txt"
+
+    image = cv2.imread(img_path)
+    if image is None:
         continue
 
-    img_path = os.path.join(DATASET_DIR, img_name)
-    txt_path = img_path.replace(".png", ".txt")
+    bboxes, labels = load_yolo_label(label_path)
+    if not bboxes:
+        continue
 
-    # Load ảnh gốc
-    img = cv2.imread(img_path)
+    for _ in range(AUG_PER_IMAGE):
+        augmented = transform(
+            image=image,
+            bboxes=bboxes,
+            class_labels=labels
+        )
 
-    # Load label gốc
-    with open(txt_path, "r", encoding="utf-8") as f:
-        label_content = f.read().strip()
+        new_name = f"{class_name}_{start_idx}"
+        start_idx += 1
 
-    # Tạo AUG_PER_IMAGE ảnh mới
-    for i in range(AUG_PER_IMAGE):
+        cv2.imwrite(
+            os.path.join(CLASS_DIR, new_name + ".png"),
+            augmented["image"]
+        )
 
-        augmented = transform(image=img)["image"]
+        save_yolo_label(
+            os.path.join(CLASS_DIR, new_name + ".txt"),
+            augmented["bboxes"],
+            augmented["class_labels"]
+        )
 
-        # Tạo tên file mới theo yêu cầu
-        new_img_name = f"chaotrang_{new_index}.png"
-        new_txt_name = f"chaotrang_{new_index}.txt"
-
-        # Lưu ảnh augment
-        cv2.imwrite(os.path.join(DATASET_DIR, new_img_name), augmented)
-
-        # Lưu label
-        with open(os.path.join(DATASET_DIR, new_txt_name), "w", encoding="utf-8") as f:
-            f.write(label_content)
-
-        new_index += 1
-
-print("=====================================")
-print(f"✔ Đã augment từ chaotrang_{START_FROM} → chaotrang_{max(existing_nums)}")
-print(f"✔ Ảnh mới bắt đầu từ: chaotrang_{start_index}.png")
-print(f"✔ Ảnh cuối cùng là: chaotrang_{new_index - 1}.png")
-print("=====================================")
+print("=== AUGMENT XONG – BBOX ĐÃ UPDATE ===")
