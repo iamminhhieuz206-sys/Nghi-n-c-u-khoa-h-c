@@ -1,0 +1,27 @@
+from ultralytics import YOLO
+
+def main():
+    # Load model YOLOv8 (nhẹ cho mobile)
+    model = YOLO("yolov8n.pt")  # n = nano (tốt cho điện thoại)
+
+    # Train model
+    model.train(
+        data="data.yaml",
+        epochs=100,
+        imgsz=640,
+        batch=16,
+        device=0,          # GPU
+        workers=8,
+        project="runs",
+        name="mhz_yolo"
+    )
+
+    # Sau khi train xong → export sang TFLite
+    model.export(
+        format="tflite",
+        imgsz=640,
+        int8=True   # QUAN TRỌNG: tối ưu cho mobile
+    )
+
+if __name__ == "__main__":
+    main()
